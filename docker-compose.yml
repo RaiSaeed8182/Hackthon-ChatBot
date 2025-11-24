@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  chatbot:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_HOST=${MYSQL_HOST}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+    env_file:
+      - .env
+    restart: always
+    networks:
+      - chatbot-network
+
+  # Optional: MySQL Database (if you want to run it in container)
+  # mysql:
+  #   image: mysql:8.0
+  #   ports:
+  #     - "3306:3306"
+  #   environment:
+  #     - MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD}
+  #     - MYSQL_DATABASE=${MYSQL_DATABASE}
+  #   volumes:
+  #     - mysql_data:/var/lib/mysql
+  #   networks:
+  #     - chatbot-network
+
+networks:
+  chatbot-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
