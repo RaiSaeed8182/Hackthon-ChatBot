@@ -1,6 +1,6 @@
-import streamlit as st 
-import os 
-from dotenv import load_dotenv 
+import streamlit as st
+import os
+from dotenv import load_dotenv
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.runnables.history import RunnableWithMessageHistory
@@ -9,26 +9,20 @@ import io
 import base64
 import tempfile
 import numpy as np
-from scipy.io import wavfile
-
-# Import live audio recorder
-from streamlit_audio_recorder import streamlit_live_audio_recorder
-from langchain.agents import create_sql_agent
-from langchain.sql_database import SQLDatabase
+from langchain_community.agent_toolkits.sql.base import create_sql_agent
+from langchain_community.utilities import SQLDatabase
 from langchain.agents.agent_types import AgentType
-from langchain.agents.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.agent_toolkits.sql.toolkit import SQLDatabaseToolkit
 from sqlalchemy import create_engine
 import sqlite3
 from langchain_openai import ChatOpenAI
-from openai import OpenAI  # For Whisper STT and TTS
+from openai import OpenAI
 
-st.set_page_config(page_title="Lab Tests Assistant", page_icon="�")
-#st.title("Multi-Agent ChatBot: Database + Lab Tests & Pricing")
+st.set_page_config(page_title="Hospital AI Assistant", page_icon="🏥")
 
 # =====================================================
 # 🎨 Beautiful UI Styling
 # =====================================================
-# Custom CSS for beautiful interface
 st.markdown("""
     <style>
     .header-container {
@@ -59,29 +53,14 @@ st.markdown("""
         padding: 0.5rem 1.5rem;
         font-weight: 600;
     }
-    .stTextInput>div>div>input {
-        border-radius: 10px;
-        border: 2px solid #e0e0e0;
-        padding: 0.75rem;
-    }
-    .stTextInput>div>div>input:focus {
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-    .stRadio>div {
-        background: white;
-        padding: 1rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
     </style>
 """, unsafe_allow_html=True)
 
-# Beautiful Header (replaces the title)
+# Beautiful Header
 st.markdown("""
     <div class="header-container">
-        <h1 class="header-title">🏥 Hospital Management System</h1>
-        <p class="header-subtitle">AI-Powered SQL Database ChatBot</p>
+        <h1 class="header-title">🏥 Hospital AI Assistant</h1>
+        <p class="header-subtitle">Voice & Text Powered Database ChatBot</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -90,7 +69,6 @@ st.markdown("""
 # =====================================================
 load_dotenv()
 
-# MySQL configuration - Load from .env file
 MYSQL_CONFIG = {
     'user': os.getenv("MYSQL_USER", "root"),
     'password': os.getenv("MYSQL_PASSWORD"),
@@ -98,33 +76,24 @@ MYSQL_CONFIG = {
     'database': os.getenv("MYSQL_DATABASE", "HospitalManagementSystem")
 }
 
-# Validate MySQL credentials
 if not MYSQL_CONFIG['password']:
     st.error("❌ MYSQL_PASSWORD not found in .env file!")
     st.stop()
 
-# API Keys - Load from environment
 openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
-
 if not openai_api_key:
     st.error("❌ OPENAI_API_KEY not found in .env file!")
-    st.info("Please set your OpenAI API key in the .env file")
     st.stop()
 
-
-
 # =====================================================
-# 🔹 Initialize OpenAI Client & LLM
+# 🔹 Initialize OpenAI
 # =====================================================
 try:
-    # OpenAI client for Whisper (STT) and TTS
     openai_client = OpenAI(api_key=openai_api_key)
-    
-    # SQL Agent LLM
     sql_llm = ChatOpenAI(
         model="gpt-3.5-turbo",
         temperature=0,
-        streaming=False, 
+        streaming=False,
         openai_api_key=openai_api_key
     )
     llm_status = "✅ Initialized"
@@ -134,30 +103,21 @@ except Exception as e:
     st.stop()
 
 # =====================================================
-# 🔹 Voice Processing Functions (STT & TTS)
+# 🔹 Voice Functions
 # =====================================================
-
-def speech_to_text(audio_data) -> str:
-    """Convert audio (numpy array or bytes) to text using OpenAI Whisper API."""
+def speech_to_text(audio_file) -> str:
+    """Convert audio to text using OpenAI Whisper API."""
     try:
-        # Handle both numpy arrays and bytes
-        if isinstance(audio_data, np.ndarray):
-            # Convert numpy array to WAV bytes using scipy
-            wav_buffer = io.BytesIO()
-            wavfile.write(wav_buffer, 16000, (audio_data * 32767).astype(np.int16))
-            wav_buffer.seek(0)
-            audio_bytes = wav_buffer.getvalue()
-        else:
-            audio_bytes = audio_data
-        
-        # Create a BytesIO object to simulate file
-        audio_file = io.BytesIO(audio_bytes)
-        audio_file.name = "audio.wav"
-        
-        # Use Whisper API
+        if audio_file is None:
+            return ""
+
+        audio_bytes = audio_file.getvalue()
+        audio_buffer = io.BytesIO(audio_bytes)
+        audio_buffer.name = "audio.wav"
+
         transcript = openai_client.audio.transcriptions.create(
             model="whisper-1",
-            file=audio_file
+            file=audio_buffer
         )
         return transcript.text
     except Exception as e:
@@ -165,12 +125,12 @@ def speech_to_text(audio_data) -> str:
         return ""
 
 def text_to_speech(text: str) -> bytes:
-    """Convert text to speech using OpenAI TTS API (best quality)."""
+    """Convert text to speech using OpenAI TTS API."""
     try:
         response = openai_client.audio.speech.create(
-            model="tts-1-hd",  # Highest quality model
-            voice="alloy",  # Professional voice (options: alloy, echo, fable, onyx, nova, shimmer)
-            input=text
+            model="tts-1-hd",
+            voice="alloy",
+            input=text[:4000]  # Limit length
         )
         return response.content
     except Exception as e:
@@ -178,7 +138,7 @@ def text_to_speech(text: str) -> bytes:
         return b""
 
 def play_audio(audio_bytes: bytes):
-    """Display audio player in Streamlit."""
+    """Display audio player."""
     if audio_bytes:
         st.audio(audio_bytes, format="audio/mp3")
 
@@ -187,7 +147,6 @@ def play_audio(audio_bytes: bytes):
 # =====================================================
 @st.cache_resource(ttl="2h")
 def configure_mysql_db():
-    """Establishes connection to the MySQL database."""
     try:
         connection_string = f"mysql+mysqlconnector://{MYSQL_CONFIG['user']}:{MYSQL_CONFIG['password']}@{MYSQL_CONFIG['host']}/{MYSQL_CONFIG['database']}"
         engine = create_engine(connection_string)
@@ -196,100 +155,24 @@ def configure_mysql_db():
     except Exception as e:
         return None, f"❌ Error: {e}"
 
-# Initialize database connection
 db, db_status = configure_mysql_db()
 if db is None:
     sql_agent = None
-    agent_status = "❌ Disabled"
+    agent_status = "❌ Database connection failed"
 else:
-    # Create SQL agent if database is available
-    sql_agent = None
     try:
         toolkit = SQLDatabaseToolkit(db=db, llm=sql_llm)
         sql_agent = create_sql_agent(
             llm=sql_llm,
             toolkit=toolkit,
-            verbose=True,
+            verbose=False,
             agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             handle_parsing_errors=True
         )
-        agent_status = "✅ Created"
+        agent_status = "✅ Ready"
     except Exception as e:
-        agent_status = f"❌ Error: {e}"
+        agent_status = f"❌ Error: {str(e)[:50]}..."
         sql_agent = None
-
-# =====================================================
-# 🔹 Greeting Handler
-# =====================================================
-
-def is_greeting_or_casual(query: str) -> bool:
-    """Check if query is a greeting or casual conversation."""
-    query_lower = query.lower().strip()
-    greetings = [
-        'hey', 'hi', 'hello', 'good morning', 'good afternoon', 'good evening',
-        'greetings', 'howdy', 'what\'s up', 'sup', 'yo', 'hii', 'heyy',
-        'thanks', 'thank you', 'bye', 'goodbye', 'see you'
-    ]
-    return query_lower in greetings or len(query_lower.split()) <= 3
-
-def get_friendly_greeting_response(query: str) -> str:
-    """Generate a friendly greeting response."""
-    query_lower = query.lower().strip()
-    
-    if any(word in query_lower for word in ['hey', 'hi', 'hello', 'hii', 'heyy']):
-        return """👋 **Hello! Welcome to the Hospital Management System!**
-
-I'm your AI assistant, and I can help you query the hospital database with **20 comprehensive tables**:
-
-🏥 **Available Information:**
-   - **Patients** - Patient records, demographics, status, blood types, allergies
-   - **Doctors** - Doctor directory, specializations, schedules, availability
-   - **Lab Results** - Test results, values, normal ranges, critical flags
-   - **Medications** - Prescriptions, dosages, frequencies, status
-   - **Departments** - Department info, head doctors, locations
-   - **Wards** - Ward management, bed availability, charge nurses
-   - **ICU Beds** - ICU bed status, equipment, patient assignments
-   - **Medical Equipment** - Equipment status, maintenance, locations
-   - **Pharmacy** - Medicine inventory, pricing, suppliers, expiry
-   - **Disease Knowledge Base** - Disease info, symptoms, treatments, ICD10 codes
-   - **Drug Information** - Drug details, uses, side effects, contraindications
-   - **SOPs** - Standard operating procedures and protocols
-   - **Use Case Scenarios** - Emergency scenarios and procedures
-   - **Triage Symptoms** - Symptom keywords, urgency levels, actions
-   - **Triage Protocols** - Triage protocols, response times, alerts
-   - **Appointments** - Appointment scheduling and management
-   - **Nursing Staff** - Nurse assignments, shifts, departments
-   - **Surgical Procedures** - Surgery scheduling and tracking
-   - **Billing** - Patient billing, payments, insurance
-   - **Doctor Schedules** - Doctor schedules, OPD timings, locations
-
-**How can I help you today?** Try asking:
-- "Show me all patients"
-- "List doctors in Cardiology"
-- "What medications is patient P001 taking?"
-- "Show available beds in Ward A"
-- "List all lab results for patient P001"
-- "Show appointments for today"
-- "What is the status of ICU beds?"
-
-Ask me anything about the hospital database! 😊"""
-    
-    elif any(word in query_lower for word in ['thanks', 'thank you']):
-        return "You're welcome! 😊 Is there anything else I can help you with?"
-    
-    elif any(word in query_lower for word in ['bye', 'goodbye', 'see you']):
-        return "Goodbye! Take care, and feel free to come back anytime you need assistance! 👋"
-    
-    else:
-        return """👋 **Hello! I'm here to help!**
-
-I can assist you with:
-- 🏥 Hospital database queries (patients, doctors, wards, etc.)
-- 🔬 Lab tests information (descriptions, pricing, normal ranges)
-
-**What would you like to know?** Feel free to ask me anything! 😊"""
-
-# No routing needed - we only have SQL agent now
 
 # =====================================================
 # 🔹 Session Management
@@ -298,16 +181,14 @@ if "store" not in st.session_state:
     st.session_state.store = {}
 
 def get_session_history(session_id: str) -> ChatMessageHistory:
-    """Get or create chat history for a session"""
     if session_id not in st.session_state.store:
         st.session_state.store[session_id] = ChatMessageHistory()
     return st.session_state.store[session_id]
 
 # =====================================================
-# 🔹 Create Agents with History
+# 🔹 Create Agent with History
 # =====================================================
 sql_agent_with_history = None
-
 if sql_agent is not None:
     sql_agent_with_history = RunnableWithMessageHistory(
         sql_agent,
@@ -317,289 +198,199 @@ if sql_agent is not None:
     )
 
 # =====================================================
-# 🔹 Sidebar - All Settings and Info
+# 🔹 Sidebar
 # =====================================================
-st.sidebar.markdown("""
-    <div style='text-align: center; padding: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 1rem;'>
-        <h2 style='color: white; margin: 0;'>🏥 System Status</h2>
-    </div>
-""", unsafe_allow_html=True)
-
-# System Status
 st.sidebar.markdown("### 🔧 System Status")
-st.sidebar.markdown(f"""
-    <div style='background: white; padding: 1rem; border-radius: 8px; margin: 0.5rem 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
-        <p style='margin: 0.5rem 0;'><strong>🤖 LLM:</strong> {llm_status}</p>
-        <p style='margin: 0.5rem 0;'><strong>💾 Database:</strong> {db_status}</p>
-        <p style='margin: 0.5rem 0;'><strong>⚙️ SQL Agent:</strong> {agent_status}</p>
-    </div>
-""", unsafe_allow_html=True)
+st.sidebar.markdown(f"**🤖 LLM:** {llm_status}")
+st.sidebar.markdown(f"**💾 Database:** {db_status}")
+st.sidebar.markdown(f"**⚙️ SQL Agent:** {agent_status}")
 
-# Session Settings
-st.sidebar.markdown("### 👤 Session Settings")
-session_id = st.sidebar.text_input(
-    "Session ID:",
-    value="user1",
-    help="Enter a unique session ID to maintain separate chat histories",
-    key="session_input"
-)
-
-# System Info
-st.sidebar.markdown("### ⚙️ System Info")
-st.sidebar.info("💾 **SQL Database Agent** - Query your hospital database")
-
-# Chat Interface Info
-st.sidebar.markdown("### 💬 Chat Interface")
-st.sidebar.info("👋 Start a conversation! Type a message below or try saying 'hey' to get started.")
-
-# Voice Input Options
 st.sidebar.markdown("### 🎤 Voice Input")
-voice_enabled = st.sidebar.checkbox("🎙️ Enable Voice Input", value=True, help="Use microphone to record messages")
-# NOTE: TTS is now ONLY used when voice input is used
-st.sidebar.info("📱 When using voice input, the AI will respond with voice output. Text input gets text-only responses.")
+voice_enabled = st.sidebar.checkbox("Enable Voice", value=True)
 
-
-# Get chat history for current session
+session_id = st.sidebar.text_input("Session ID:", value="user1")
 chat_history = get_session_history(session_id)
 
-# Clear chat history button in sidebar
-if len(chat_history.messages) > 0:
-    st.sidebar.markdown("---")
-    if st.sidebar.button("🗑️ Clear Chat History", use_container_width=True):
-        chat_history.clear()
-        st.sidebar.success("Chat history cleared!")
-        st.rerun()
+if st.sidebar.button("🗑️ Clear Chat"):
+    chat_history.clear()
+    st.rerun()
 
 # =====================================================
-# 🔹 Main Chat Interface - Clean Screen
+# 🔹 Main Chat Interface
 # =====================================================
-# Show Previous Messages
+st.markdown("### 💬 Conversation")
+
+# Show chat history
 if len(chat_history.messages) > 0:
-    for i, msg in enumerate(chat_history.messages):
+    for msg in chat_history.messages:
         if isinstance(msg, HumanMessage):
-            with st.chat_message("user", avatar="👤"):
+            with st.chat_message("user"):
                 st.markdown(msg.content)
         else:
-            with st.chat_message("assistant", avatar="🤖"):
+            with st.chat_message("assistant"):
                 st.markdown(msg.content)
+else:
+    with st.chat_message("assistant"):
+        st.markdown("👋 **Hello!** I'm your hospital database assistant. Ask me anything!")
 
 # =====================================================
-# 🔹 Chat Input Section - Bottom of page
+# 🔹 Input Section
 # =====================================================
 st.markdown("---")
+st.markdown("### 💬 Ask Your Question")
 
-# Container for input - will be at bottom
-input_container = st.container()
+# Create columns for input methods
+col1, col2 = st.columns(2)
 
-with input_container:
-    st.markdown("### 💬 Send Your Question")
-    
-    # Create two columns: Text and Voice
-    col_text, col_voice = st.columns([1, 1], gap="medium")
-    
-    question = None
-    voice_input_used = False
-    
-    # TEXT INPUT COLUMN
-    with col_text:
-        st.markdown("#### 📝 Text Input")
-        st.markdown("*Type your question for instant text response*")
-        question = st.chat_input("💬 Ask anything about the hospital database...", key="text_input_main")
-        
-        if question:
-            st.session_state.use_voice_response = False
-            st.session_state.input_submitted = True
-    
-    # VOICE INPUT COLUMN
-    with col_voice:
-        st.markdown("#### 🎤 Voice Input")
-        st.markdown("*Speak your question for voice + text response*")
-        
-        if voice_enabled:
-            # Voice recording controls
-            col_rec1, col_rec2 = st.columns([1, 1])
-            with col_rec1:
-                if st.button("🎙️ START RECORDING", use_container_width=True, key="voice_start"):
-                    st.session_state.voice_recording = True
-                    st.rerun()
-            with col_rec2:
-                if st.button("⏹️ STOP RECORDING", use_container_width=True, key="voice_stop"):
-                    st.session_state.voice_recording = False
-                    st.rerun()
-            
-            # Show recording status
-            if st.session_state.get("voice_recording", False):
-                st.info("🔴 Recording... Speak now!")
-            
-            # Audio recorder (works in background)
-            audio_data = streamlit_live_audio_recorder()
-            
-            if audio_data is not None and not st.session_state.get("voice_recording", False):
-                # Show recording info
-                duration = len(audio_data) / 16000
-                st.success(f"✅ Recorded: {duration:.2f}s")
-                
-                # Transcribe button
-                if st.button("📤 Transcribe & Send", use_container_width=True, key="transcribe_voice"):
-                    with st.spinner("🔄 Transcribing..."):
-                        transcribed_text = speech_to_text(audio_data)
-                    
-                    if transcribed_text:
-                        st.session_state.voice_question = transcribed_text
-                        st.session_state.use_voice_response = True
-                        st.success("✅ Sending to AI with voice response enabled...")
-                        st.session_state.recorded_audio = None
-                        st.rerun()
+question = None
+use_voice = False
+
+# Text Input
+with col1:
+    st.markdown("#### 📝 Text Input")
+    text_input = st.text_input("Type your question:", key="text_input")
+    if text_input:
+        question = text_input
+        use_voice = False
+
+# Voice Input
+with col2:
+    st.markdown("#### 🎤 Voice Input")
+    if voice_enabled:
+        audio_input = st.audio_input("Record your question:", key="audio_input")
+        if audio_input is not None:
+            st.audio(audio_input, format="audio/wav")
+            if st.button("🎯 Transcribe & Send", use_container_width=True):
+                with st.spinner("🎤 Transcribing..."):
+                    transcribed = speech_to_text(audio_input)
+                    if transcribed:
+                        question = transcribed
+                        use_voice = True
+                        st.success(f"🎯 Heard: '{transcribed}'")
                     else:
-                        st.error("❌ Could not transcribe audio. Please try again.")
-            
-            st.markdown("---")
-            st.markdown("**Or type your question below:**")
-            voice_text = st.text_area("📝 Type your question:", height=100, key="voice_text_fallback")
-            if voice_text:
-                if st.button("📤 Send (with Voice Response)", use_container_width=True, key="send_text_question"):
-                    st.session_state.voice_question = voice_text
-                    st.session_state.use_voice_response = True
-                    st.success("✅ Sending with voice response enabled...")
-                    st.rerun()
-        else:
-            st.info("🎙️ Voice input is disabled. Enable it in the sidebar to use this feature.")
+                        st.error("❌ Could not understand audio")
+    else:
+        st.info("Voice input disabled")
 
-# Check if there's a voice question stored
-use_voice_response = st.session_state.get("use_voice_response", False)
-if "voice_question" in st.session_state and st.session_state.voice_question:
-    question = st.session_state.voice_question
-    st.session_state.voice_question = None  # Clear it after use
-    st.session_state.use_voice_response = False  # Reset flag
-
+# =====================================================
+# 🔹 Process Question
+# =====================================================
 if question:
     # Display user message
     with st.chat_message("user"):
         st.write(question)
-    
+
     try:
-        # Check if it's a greeting first
-        if is_greeting_or_casual(question):
-            # Handle greetings with friendly response
+        # Check if greeting - be more specific
+        greeting_words = ['hey', 'hi', 'hello', 'good morning', 'good afternoon', 'good evening', 'greetings', 'howdy', 'what\'s up', 'sup', 'yo', 'thanks', 'thank you', 'bye', 'goodbye', 'how are you', 'how do you do']
+        casual_phrases = ['can you', 'could you', 'would you', 'please', 'help me', 'i need', 'tell me']
+
+        # Only treat as greeting if it's very short OR contains only greeting words
+        is_greeting = (len(question.split()) <= 3 and any(word in question.lower() for word in greeting_words)) or \
+                     (question.lower().strip() in greeting_words) or \
+                     (len(question.split()) <= 5 and all(word in greeting_words + casual_phrases for word in question.lower().split()) and not any(keyword in question.lower() for keyword in ['show', 'list', 'get', 'find', 'what', 'who', 'where', 'when', 'how many', 'doctor', 'patient', 'medication', 'bed', 'ward', 'appointment']))
+
+        if is_greeting:
+            # Handle greeting
+            if 'hello' in question.lower() or 'hi' in question.lower():
+                response = """👋 **Hello!** I'm your hospital database assistant.
+
+I can help you query the hospital database. Try asking:
+- "Show me all patients"
+- "List doctors in Cardiology"
+- "What medications for patient P001?"
+- "Show available beds in Ward A"
+
+Ask me anything!"""
+            elif 'thanks' in question.lower():
+                response = "You're welcome! 😊 How else can I help?"
+            elif 'bye' in question.lower():
+                response = "Goodbye! Take care! 👋"
+            else:
+                response = "👋 Hello! How can I help you with the hospital database?"
+
             with st.chat_message("assistant"):
-                friendly_response = get_friendly_greeting_response(question)
-                st.markdown(friendly_response)
-            
-            # Add to chat history
-            chat_history.add_user_message(question)
-            chat_history.add_ai_message(friendly_response)
-            
-            # Convert to speech ONLY if voice input was used
-            if use_voice_response:
+                st.markdown(response)
+
+            # Voice response for greetings
+            if use_voice:
                 with st.spinner("🔊 Generating voice response..."):
-                    audio_response = text_to_speech(friendly_response)
+                    audio_response = text_to_speech(response)
                     if audio_response:
                         st.markdown("---")
                         st.markdown("### 🔉 Voice Response:")
                         play_audio(audio_response)
+
+            chat_history.add_user_message(question)
+            chat_history.add_ai_message(response)
+
         else:
-            # Use SQL agent directly
-            config = {"configurable": {"session_id": session_id}}
-            
-            # Display assistant message
+            # Handle database query
             with st.chat_message("assistant"):
                 message_placeholder = st.empty()
-                full_response = ""
-                
+
                 if sql_agent_with_history is not None:
                     with st.spinner("🔍 Querying database..."):
                         try:
-                            response = sql_agent_with_history.invoke(
+                            config = {"configurable": {"session_id": session_id}}
+                            result = sql_agent_with_history.invoke(
                                 {"input": question},
                                 config=config
                             )
-                            answer = response["output"] if "output" in response else str(response)
-                            full_response = answer
-                            message_placeholder.write(full_response)
+
+                            if isinstance(result, dict) and "output" in result:
+                                answer = result["output"]
+                            else:
+                                answer = str(result)
+
+                            # Clean up response
+                            if "I don't know" in answer.lower() or "don't know" in answer.lower():
+                                answer = "I'm sorry, I couldn't find that information. Try rephrasing your question or check if the data exists."
+                            elif len(answer.strip()) < 10:
+                                answer = "I received an incomplete response. Please try a different question."
+
+                            message_placeholder.markdown(answer)
+                            st.success("✅ Query completed!")
+
+                            # Voice response
+                            if use_voice:
+                                with st.spinner("🔊 Generating voice response..."):
+                                    audio_response = text_to_speech(answer[:4000])
+                                    if audio_response:
+                                        st.markdown("---")
+                                        st.markdown("### 🔉 Voice Response:")
+                                        play_audio(audio_response)
+
+                            chat_history.add_user_message(question)
+                            chat_history.add_ai_message(answer)
+
                         except Exception as sql_error:
-                            st.error(f"SQL Agent Error: {sql_error}")
-                            full_response = f"I encountered an error while querying the database: {str(sql_error)}. Please try rephrasing your question or check the database connection."
-                            message_placeholder.write(full_response)
+                            error_msg = "I encountered an issue with your query. Please try a simpler question or check the database connection."
+                            message_placeholder.error(error_msg)
+                            chat_history.add_user_message(question)
+                            chat_history.add_ai_message(error_msg)
                 else:
-                    full_response = "Sorry, the SQL agent is not available. Please check your database connection and configuration."
-                    message_placeholder.write(full_response)
-                
-                # Convert to speech ONLY if voice input was used
-                if use_voice_response and full_response:
-                    st.markdown("---")
-                    with st.spinner("🔊 Generating voice response..."):
-                        # Limit response length for TTS (API has 4096 char limit)
-                        tts_text = full_response[:4000] if len(full_response) > 4000 else full_response
-                        audio_response = text_to_speech(tts_text)
-                        if audio_response:
-                            st.markdown("### 🔉 Voice Response:")
-                            play_audio(audio_response)
-                
-                # Add messages to history
-                chat_history.add_user_message(question)
-                chat_history.add_ai_message(full_response)
-        
+                    error_msg = "❌ Database not available. Please check your connection."
+                    message_placeholder.error(error_msg)
+                    chat_history.add_user_message(question)
+                    chat_history.add_ai_message(error_msg)
+
     except Exception as e:
-        st.error(f"❌ Unexpected Error: {e}")
-        import traceback
-        st.code(traceback.format_exc())
-        
-        # Fallback response
-        fallback_response = "I encountered an unexpected error. Please try rephrasing your question or check your configuration. If the problem persists, please contact support."
-        with st.chat_message("assistant"):
-            st.write(fallback_response)
+        st.error(f"❌ Error: {str(e)[:100]}...")
         chat_history.add_user_message(question)
-        chat_history.add_ai_message(fallback_response)
-
-# Database Info
-st.sidebar.markdown("### 💾 Database Info")
-st.sidebar.markdown(f"""
-    <div style='background: white; padding: 1rem; border-radius: 8px; margin: 0.5rem 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
-        <p style='margin: 0.5rem 0;'><strong>🌐 Host:</strong> {MYSQL_CONFIG['host']}</p>
-        <p style='margin: 0.5rem 0;'><strong>📊 Database:</strong> {MYSQL_CONFIG['database']}</p>
-    </div>
-""", unsafe_allow_html=True)
-
-# Session Info
-st.sidebar.markdown("### 📝 Session Info")
-st.sidebar.markdown(f"""
-    <div style='background: white; padding: 1rem; border-radius: 8px; margin: 0.5rem 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
-        <p style='margin: 0.5rem 0;'><strong>👤 Session:</strong> {session_id}</p>
-        <p style='margin: 0.5rem 0;'><strong>💬 Messages:</strong> {len(chat_history.messages)}</p>
-    </div>
-""", unsafe_allow_html=True)
-
-# Show available sessions
-if len(st.session_state.store) > 1:
-    st.sidebar.markdown("### 📚 Other Sessions")
-    for sid in st.session_state.store.keys():
-        if sid != session_id:
-            message_count = len(st.session_state.store[sid].messages)
-            st.sidebar.markdown(f"📝 **{sid}** ({message_count} messages)")
+        chat_history.add_ai_message(f"I encountered an error: {str(e)[:100]}...")
 
 # =====================================================
-# 🔹 Usage Examples - Beautiful Cards
+# 🔹 Examples
 # =====================================================
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 💡 Quick Examples")
-
-with st.sidebar.expander("🏥 Database Queries", expanded=False):
-    examples_db = [
+with st.sidebar.expander("💡 Examples", expanded=False):
+    examples = [
         "List all patients",
-        "Show patients in ICU",
-        "Which doctors are in Cardiology?",
-        "What medications is patient P001 taking?",
-        "Show available beds in Ward A",
-        "List all lab results for patient P001",
-        "What equipment is in maintenance?",
-        "Show pharmacy stock levels",
-        "Show appointments for today",
-        "List all nurses in Ward A",
-        "Show surgical procedures scheduled",
-        "Display billing information for patient P001",
-        "Show doctor schedules for Monday",
-        "List triage symptoms with high urgency",
-        "Show disease knowledge for diabetes"
+        "Show doctors in Cardiology",
+        "What medications for patient P001?",
+        "Show available beds",
+        "List appointments today"
     ]
-    for ex in examples_db:
-        st.markdown(f"• `{ex}`")
+    for ex in examples:
+        st.markdown(f"• {ex}")
