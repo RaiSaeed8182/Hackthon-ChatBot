@@ -12,6 +12,7 @@ import numpy as np
 from scipy.io import wavfile
 
 # Audio recording not available in cloud - using text input only
+# Updated: 2025-11-24 - Demo mode only
 audio_recorder_available = False
 
 # Simplified imports for demo mode only
