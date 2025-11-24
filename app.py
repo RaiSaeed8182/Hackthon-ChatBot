@@ -13,12 +13,8 @@ from scipy.io import wavfile
 
 # Audio recording not available in cloud - using text input only
 audio_recorder_available = False
-from langchain_community.agent_toolkits.sql.base import create_sql_agent
-from langchain_community.utilities import SQLDatabase
-from langchain_core.agents import AgentType
-from langchain_community.agent_toolkits.sql.toolkit import SQLDatabaseToolkit
-from sqlalchemy import create_engine
-import sqlite3
+
+# Simplified imports for demo mode only
 from langchain_openai import ChatOpenAI
 from openai import OpenAI  # For Whisper STT and TTS
 from langdetect import detect, LangDetectException  # Language detection
@@ -90,7 +86,7 @@ elif not mysql_password:
 # =====================================================
 try:
     openai_client = OpenAI(api_key=openai_api_key)
-    sql_llm = ChatOpenAI(
+    llm = ChatOpenAI(
         model="gpt-3.5-turbo",
         temperature=0,
         streaming=False,
@@ -238,39 +234,11 @@ def get_demo_response(question: str, language: str = "en") -> str:
         return responses["default"]
 
 # =====================================================
-# 🔹 Setup SQL Agent
+# 🔹 Demo Mode Setup
 # =====================================================
-@st.cache_resource(ttl="2h")
-def configure_mysql_db():
-    try:
-        connection_string = f"mysql+mysqlconnector://{MYSQL_CONFIG['user']}:{MYSQL_CONFIG['password']}@{MYSQL_CONFIG['host']}/{MYSQL_CONFIG['database']}"
-        engine = create_engine(connection_string)
-        db = SQLDatabase(engine)
-        return db, "✅ Connected"
-    except Exception as e:
-        return None, f"❌ Error: {e}"
-
-db, db_status = configure_mysql_db()
-if db is None:
-    sql_agent_with_history = None
-    if demo_mode:
-        db_status = "🔄 Demo Mode - Sample responses available"
-    else:
-        db_status = f"❌ Database connection failed: {db_status}"
-else:
-    try:
-        toolkit = SQLDatabaseToolkit(db=db, llm=sql_llm)
-        sql_agent = create_sql_agent(
-            llm=sql_llm,
-            toolkit=toolkit,
-            verbose=True,
-            agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-            handle_parsing_errors=True
-        )
-        sql_agent_with_history = sql_agent
-    except Exception as e:
-        sql_agent_with_history = None
-        db_status = f"❌ Agent setup failed: {e}"
+# App runs in demo mode only - no database required
+demo_mode = True
+db_status = "🔄 Demo Mode - Sample hospital data available"
 
 # =====================================================
 # 🔹 Greeting Handler
@@ -500,20 +468,8 @@ if st.session_state.get("pending_question"):
             response_text = get_friendly_greeting_response(question, input_language)
         else:
             with st.spinner(f"🔍 Processing query... (Detected: {language_name})"):
-                if sql_agent_with_history:
-                    # Add language instruction to the query
-                    multilingual_prompt = f"Answer in {language_name}. Question: {question}"
-                    config = {"configurable": {"session_id": session_id}}
-                    result = sql_agent_with_history.invoke(
-                        {"input": multilingual_prompt},
-                        config=config
-                    )
-                    response_text = result.get("output", str(result))
-                elif demo_mode:
-                    # Demo mode responses
-                    response_text = get_demo_response(question, input_language)
-                else:
-                    response_text = "❌ Database not available. Please check your MySQL connection."
+                # Demo mode only - provide sample responses
+                response_text = get_demo_response(question, input_language)
 
         # Add to history with language indicator
         chat_history.add_user_message(f"[{language_name}] {question}")
