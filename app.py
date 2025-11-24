@@ -15,7 +15,7 @@ from scipy.io import wavfile
 audio_recorder_available = False
 from langchain_community.agent_toolkits.sql.base import create_sql_agent
 from langchain_community.utilities import SQLDatabase
-from langchain.agents import AgentType
+from langchain_core.agents import AgentType
 from langchain_community.agent_toolkits.sql.toolkit import SQLDatabaseToolkit
 from sqlalchemy import create_engine
 import sqlite3
