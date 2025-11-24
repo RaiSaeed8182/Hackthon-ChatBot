@@ -11,13 +11,8 @@ import tempfile
 import numpy as np
 from scipy.io import wavfile
 
-# Try to import live audio recorder (may not work in cloud)
-try:
-    from streamlit_audio_recorder import streamlit_live_audio_recorder
-    audio_recorder_available = True
-except ImportError:
-    audio_recorder_available = False
-    st.sidebar.warning("⚠️ Live audio recorder not available in cloud environment")
+# Audio recording not available in cloud - using text input only
+audio_recorder_available = False
 from langchain.agents import create_sql_agent
 from langchain.sql_database import SQLDatabase
 from langchain.agents.agent_types import AgentType
@@ -355,7 +350,8 @@ st.sidebar.markdown("### 💬 Chat")
 st.sidebar.info("👋 Use text or voice to ask questions!")
 
 st.sidebar.markdown("### 🎤 Voice")
-voice_enabled = st.sidebar.checkbox("🎙️ Enable Voice", value=True)
+st.sidebar.info("🎤 Voice features disabled in cloud environment")
+voice_enabled = False
 
 st.sidebar.markdown("### 💾 Database")
 if demo_mode:
@@ -455,58 +451,30 @@ col1, col2, col3, col4 = st.columns([0.5, 4, 0.5, 0.5], gap="small")
 question = None
 use_voice_response = False
 
-# Voice Recording
+# Voice features disabled in cloud
 with col1:
-    if voice_enabled and audio_recorder_available:
-        if st.button("🎤", key="voice_btn", help="Record voice", use_container_width=True):
-            st.session_state.recording = not st.session_state.get("recording", False)
-            st.rerun()
-    elif voice_enabled:
-        st.info("🎤 Voice recording not available in cloud")
+    st.info("🎤 Voice input disabled in cloud")
 
 # Text Input
 with col2:
-    if st.session_state.get("recording", False) and audio_recorder_available:
-        st.write("🔴 **Recording... Speak now!**")
-        audio_data = streamlit_live_audio_recorder()
-        if audio_data is not None:
-            st.session_state.audio_data = audio_data
-            duration = len(audio_data) / 16000
-            st.write(f"✅ Recorded: {duration:.1f}s")
-            st.write("*Processing...*")
-    else:
-        with st.form("input_form", clear_on_submit=True):
-            user_input = st.text_input("", placeholder="Ask anything...", key="text_input")
-            submitted = st.form_submit_button("Send", use_container_width=True)
-            if submitted and user_input:
-                question = user_input
-                use_voice_response = False
-                st.session_state.pending_question = question
-                st.session_state.pending_voice = use_voice_response
+    with st.form("input_form", clear_on_submit=True):
+        user_input = st.text_input("", placeholder="Ask anything...", key="text_input")
+        submitted = st.form_submit_button("Send", use_container_width=True)
+        if submitted and user_input:
+            question = user_input
+            use_voice_response = False
+            st.session_state.pending_question = question
+            st.session_state.pending_voice = use_voice_response
 
-# Send Voice Button (Auto-process)
+# Voice response disabled
 with col3:
-    if st.session_state.get("audio_data") is not None and audio_recorder_available:
-        if st.button("📤 Send", key="send_voice", help="Send voice message", use_container_width=True):
-            with st.spinner("🔄 Transcribing and processing..."):
-                audio_data = st.session_state.audio_data
-                # Transcribe audio to text
-                question = speech_to_text(audio_data)
-                st.session_state.audio_data = None
-
-            if question:
-                st.session_state.pending_question = question
-                st.session_state.pending_voice = True
-                st.rerun()
-            else:
-                st.error("❌ Could not understand audio. Please try again.")
+    st.info("🔊 Voice response disabled in cloud")
 
 # Clear History
 with col4:
     if st.button("🗑️", key="clear_btn", help="Clear chat", use_container_width=True):
         chat_history.clear()
         st.session_state.pending_question = None
-        st.session_state.audio_data = None
         st.rerun()
 
 # =====================================================
@@ -551,13 +519,7 @@ if st.session_state.get("pending_question"):
         chat_history.add_user_message(f"[{language_name}] {question}")
         chat_history.add_ai_message(response_text)
 
-        # Handle voice response - ALWAYS generate audio for voice input
-        if use_voice_response:
-            # Generate audio response in the detected language
-            audio_response = text_to_speech(response_text[:4000], input_language)
-            if audio_response:
-                st.session_state.audio_response = audio_response
-                st.session_state.show_audio = True
+        # Voice response disabled in cloud
 
         # Rerun to show updated history
         st.rerun()
@@ -565,13 +527,7 @@ if st.session_state.get("pending_question"):
     except Exception as e:
         st.error(f"❌ Error: {e}")
 
-# Display audio if available
-if st.session_state.get("show_audio") and st.session_state.get("audio_response"):
-    audio_response = st.session_state.audio_response
-    st.markdown("---")
-    st.markdown("### 🔉 AI Response (Audio):")
-    play_audio(audio_response)
-    st.session_state.show_audio = False
+# Audio features disabled in cloud
 
 # Quick examples in sidebar
 st.sidebar.markdown("---")

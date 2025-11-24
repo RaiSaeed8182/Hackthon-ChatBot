@@ -1,4 +1,4 @@
-langchain>=0.1.0
+langchain
 python-dotenv
 langchain_community
 pypdf
@@ -29,4 +29,3 @@ textblob
 gtts
 pandas
 scipy
-streamlit-audio-recorder
