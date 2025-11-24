@@ -33,8 +33,10 @@ git push origin main
 1. Go to [share.streamlit.io](https://share.streamlit.io)
 2. Click "New app"
 3. Select your GitHub repository
-4. Choose the branch and `chatbot_mysqlagent.py` as the main file
+4. Choose the branch and `app.py` as the main file (default)
 5. Click "Deploy"
+
+**Note:** The app will run in demo mode if MySQL credentials are not provided, showing sample hospital data instead of connecting to a real database.
 
 ### Step 4: Add Secrets
 1. In Streamlit Cloud dashboard, go to your app settings
@@ -42,11 +44,14 @@ git push origin main
 3. Add your environment variables:
 ```toml
 OPENAI_API_KEY = "your_key_here"
+# Optional: Add MySQL credentials for real database access
 MYSQL_USER = "your_user"
 MYSQL_PASSWORD = "your_password"
 MYSQL_HOST = "your_host"
 MYSQL_DATABASE = "your_database"
 ```
+
+**Note:** Only `OPENAI_API_KEY` is required. If MySQL credentials are not provided, the app runs in demo mode with sample hospital data.
 
 ### ✅ Your app is now public at: `https://yourname-chatbot.streamlit.app`
 
@@ -109,7 +114,7 @@ az container create --resource-group mygroup \
 
 ### Step 2: Create `Procfile` in project root
 ```
-web: streamlit run chatbot_mysqlagent.py --server.port=$PORT --server.address=0.0.0.0
+web: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0
 ```
 
 ### Step 3: Create `runtime.txt`
@@ -279,10 +284,12 @@ pip install -r requirements.txt
 
 ## ✨ Next Steps
 
-1. **Test Locally**: `streamlit run chatbot_mysqlagent.py`
+1. **Test Locally**: `streamlit run app.py`
 2. **Choose Deployment**: Pick from options above
 3. **Deploy**: Follow platform-specific steps
 4. **Share URL**: Give your app URL to everyone!
 5. **Monitor**: Check logs and performance
+
+**Note:** The app now supports demo mode - it works without a database connection and shows sample hospital data for demonstration purposes.
 
 **Your AI assistant is now PUBLIC! 🎉**

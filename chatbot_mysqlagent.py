@@ -11,8 +11,13 @@ import tempfile
 import numpy as np
 from scipy.io import wavfile
 
-# Import live audio recorder
-from streamlit_audio_recorder import streamlit_live_audio_recorder
+# Try to import live audio recorder (may not work in cloud)
+try:
+    from streamlit_audio_recorder import streamlit_live_audio_recorder
+    audio_recorder_available = True
+except ImportError:
+    audio_recorder_available = False
+    st.sidebar.warning("⚠️ Live audio recorder not available in cloud environment")
 from langchain.agents import create_sql_agent
 from langchain.sql_database import SQLDatabase
 from langchain.agents.agent_types import AgentType
@@ -71,14 +76,19 @@ MYSQL_CONFIG = {
     'database': os.getenv("MYSQL_DATABASE", "HospitalManagementSystem")
 }
 
-if not MYSQL_CONFIG['password']:
-    st.error("❌ MYSQL_PASSWORD not found in .env file!")
-    st.stop()
-
+# Check for required environment variables
+mysql_password = os.getenv("MYSQL_PASSWORD")
 openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
+
+# Allow demo mode if API key is available but DB is not
+demo_mode = False
 if not openai_api_key:
     st.error("❌ OPENAI_API_KEY not found in .env file!")
     st.stop()
+elif not mysql_password:
+    st.warning("⚠️ MYSQL_PASSWORD not found. Running in demo mode with sample responses.")
+    demo_mode = True
+    MYSQL_CONFIG['password'] = None  # Will cause DB connection to fail gracefully
 
 # =====================================================
 # 🔹 Initialize OpenAI
@@ -195,6 +205,43 @@ def get_language_name(lang_code: str) -> str:
     }
     return language_map.get(lang_code, lang_code.upper())
 
+def get_demo_response(question: str, language: str = "en") -> str:
+    """Generate demo responses when database is not available."""
+    question_lower = question.lower()
+
+    # Demo responses in multiple languages
+    demo_responses = {
+        "en": {
+            "patients": "📋 **Sample Patient Data:**\n- Patient P001: Ahmed Khan, Age 45, Cardiology\n- Patient P002: Fatima Ali, Age 32, Pediatrics\n- Patient P003: Muhammad Iqbal, Age 67, Emergency\n\n*Note: This is demo data. Connect to a real database for actual patient information.*",
+            "doctors": "👨‍⚕️ **Sample Doctor Data:**\n- Dr. Sarah Ahmed (Cardiology)\n- Dr. Ali Khan (Pediatrics)\n- Dr. Fatima Noor (Emergency)\n\n*Note: This is demo data. Connect to a real database for actual doctor information.*",
+            "beds": "🛏️ **Sample Bed Availability:**\n- Ward A: 5/10 beds available\n- Ward B: 3/8 beds available\n- ICU: 2/5 beds available\n\n*Note: This is demo data. Connect to a real database for actual bed status.*",
+            "appointments": "📅 **Sample Appointments Today:**\n- 09:00 AM: Patient P001 with Dr. Sarah Ahmed\n- 02:00 PM: Patient P002 with Dr. Ali Khan\n- 04:30 PM: Patient P003 with Dr. Fatima Noor\n\n*Note: This is demo data. Connect to a real database for actual appointments.*",
+            "medications": "💊 **Sample Medications:**\n- Patient P001: Aspirin 75mg daily, Metoprolol 50mg daily\n- Patient P002: Amoxicillin 500mg 3x daily\n- Patient P003: Insulin as prescribed\n\n*Note: This is demo data. Connect to a real database for actual medication records.*",
+            "default": "🤖 **Demo Mode:** I'm running in demonstration mode without a database connection.\n\nTry asking about:\n- Show patients\n- List doctors\n- Check bed availability\n- View appointments\n- Check medications\n\n*Connect to a MySQL database for real hospital data.*"
+        },
+        "ur": {
+            "patients": "📋 **نمونی مریض ڈیٹا:**\n- مریض P001: احمد خان، عمر 45، قلبی امراض\n- مریض P002: فاطمہ علی، عمر 32، بچوں کے امراض\n- مریض P003: محمد اقبال، عمر 67، ایمرجنسی\n\n*نوٹ: یہ ڈیمو ڈیٹا ہے۔ اصل مریض کی معلومات کے لیے حقیقی ڈیٹابیس سے کنکٹ کریں۔*",
+            "doctors": "👨‍⚕️ **نمونی ڈاکٹر ڈیٹا:**\n- ڈاکٹر سارہ احمد (قلبی امراض)\n- ڈاکٹر علی خان (بچوں کے امراض)\n- ڈاکٹر فاطمہ نور (ایمرجنسی)\n\n*نوٹ: یہ ڈیمو ڈیٹا ہے۔ اصل ڈاکٹر کی معلومات کے لیے حقیقی ڈیٹابیس سے کنکٹ کریں۔*",
+            "beds": "🛏️ **نمونی بیڈ کی دستیابی:**\n- وارڈ A: 5/10 بیڈ دستیاب\n- وارڈ B: 3/8 بیڈ دستیاب\n- آئی سی یو: 2/5 بیڈ دستیاب\n\n*نوٹ: یہ ڈیمو ڈیٹا ہے۔ اصل بیڈ کی حیثیت کے لیے حقیقی ڈیٹابیس سے کنکٹ کریں۔*",
+            "default": "🤖 **ڈیمو موڈ:** میں ڈیٹابیس کنکشن کے بغیر ڈیمونسٹریشن موڈ میں چل رہا ہوں۔\n\nان کے بارے میں پوچھیں:\n- مریضوں کو دکھائیں\n- ڈاکٹروں کی فہرست\n- بیڈ کی دستیابی چیک کریں\n- ملاقاتیں دیکھیں\n- ادویات چیک کریں\n\n*اصل ہسپتال ڈیٹا کے لیے MySQL ڈیٹابیس سے کنکٹ کریں۔*"
+        }
+    }
+
+    responses = demo_responses.get(language, demo_responses["en"])
+
+    if any(word in question_lower for word in ["patient", "patients", "مرض", "مریض"]):
+        return responses["patients"]
+    elif any(word in question_lower for word in ["doctor", "doctors", "ڈاکٹر"]):
+        return responses["doctors"]
+    elif any(word in question_lower for word in ["bed", "beds", "بیڈ"]):
+        return responses["beds"]
+    elif any(word in question_lower for word in ["appointment", "appointments", "ملاقات"]):
+        return responses["appointments"]
+    elif any(word in question_lower for word in ["medication", "medications", "دوا", "ادویات"]):
+        return responses["medications"]
+    else:
+        return responses["default"]
+
 # =====================================================
 # 🔹 Setup SQL Agent
 # =====================================================
@@ -211,6 +258,10 @@ def configure_mysql_db():
 db, db_status = configure_mysql_db()
 if db is None:
     sql_agent_with_history = None
+    if demo_mode:
+        db_status = "🔄 Demo Mode - Sample responses available"
+    else:
+        db_status = f"❌ Database connection failed: {db_status}"
 else:
     try:
         toolkit = SQLDatabaseToolkit(db=db, llm=sql_llm)
@@ -224,6 +275,7 @@ else:
         sql_agent_with_history = sql_agent
     except Exception as e:
         sql_agent_with_history = None
+        db_status = f"❌ Agent setup failed: {e}"
 
 # =====================================================
 # 🔹 Greeting Handler
@@ -306,7 +358,11 @@ st.sidebar.markdown("### 🎤 Voice")
 voice_enabled = st.sidebar.checkbox("🎙️ Enable Voice", value=True)
 
 st.sidebar.markdown("### 💾 Database")
-st.sidebar.markdown(f"**Status:** {db_status}\n**Host:** {MYSQL_CONFIG['host']}")
+if demo_mode:
+    st.sidebar.markdown(f"**Status:** {db_status}")
+    st.sidebar.info("🔄 Running in demo mode with sample data")
+else:
+    st.sidebar.markdown(f"**Status:** {db_status}\n**Host:** {MYSQL_CONFIG['host']}")
 
 # =====================================================
 # 🔹 Session Management
@@ -401,14 +457,16 @@ use_voice_response = False
 
 # Voice Recording
 with col1:
-    if voice_enabled:
+    if voice_enabled and audio_recorder_available:
         if st.button("🎤", key="voice_btn", help="Record voice", use_container_width=True):
             st.session_state.recording = not st.session_state.get("recording", False)
             st.rerun()
+    elif voice_enabled:
+        st.info("🎤 Voice recording not available in cloud")
 
 # Text Input
 with col2:
-    if st.session_state.get("recording", False):
+    if st.session_state.get("recording", False) and audio_recorder_available:
         st.write("🔴 **Recording... Speak now!**")
         audio_data = streamlit_live_audio_recorder()
         if audio_data is not None:
@@ -428,14 +486,14 @@ with col2:
 
 # Send Voice Button (Auto-process)
 with col3:
-    if st.session_state.get("audio_data") is not None:
+    if st.session_state.get("audio_data") is not None and audio_recorder_available:
         if st.button("📤 Send", key="send_voice", help="Send voice message", use_container_width=True):
             with st.spinner("🔄 Transcribing and processing..."):
                 audio_data = st.session_state.audio_data
                 # Transcribe audio to text
                 question = speech_to_text(audio_data)
                 st.session_state.audio_data = None
-            
+
             if question:
                 st.session_state.pending_question = question
                 st.session_state.pending_voice = True
@@ -473,7 +531,7 @@ if st.session_state.get("pending_question"):
         if is_greeting_or_casual(question):
             response_text = get_friendly_greeting_response(question, input_language)
         else:
-            with st.spinner(f"🔍 Querying database... (Detected: {language_name})"):
+            with st.spinner(f"🔍 Processing query... (Detected: {language_name})"):
                 if sql_agent_with_history:
                     # Add language instruction to the query
                     multilingual_prompt = f"Answer in {language_name}. Question: {question}"
@@ -483,8 +541,11 @@ if st.session_state.get("pending_question"):
                         config=config
                     )
                     response_text = result.get("output", str(result))
+                elif demo_mode:
+                    # Demo mode responses
+                    response_text = get_demo_response(question, input_language)
                 else:
-                    response_text = "Database not available"
+                    response_text = "❌ Database not available. Please check your MySQL connection."
         
         # Add to history with language indicator
         chat_history.add_user_message(f"[{language_name}] {question}")
